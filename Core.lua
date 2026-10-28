@@ -38,45 +38,31 @@ function ns.InitDB()
     GoldmanShaq_StatPrioDB = GoldmanShaq_StatPrioDB or {}
     local db = GoldmanShaq_StatPrioDB
     if db.enabled == nil then db.enabled = true end
-    db.prios = db.prios or {}
-    db.ties = db.ties or {}          -- [specID] = { [position] = true } (position ties with the one above)
-    db.extra = db.extra or {}        -- [specID] = true -> also shown on tooltips
-    db.specColors = db.specColors or {} -- [specID] = { r, g, b } for the "// Spec" label
     db.minimap = db.minimap or {}
     if db.minimap.angle == nil then db.minimap.angle = 215 end
-    -- Colors changed in 0.2.0: reset old saved colors once so the new defaults apply
-    if db.colorsVersion ~= 2 then
-        db.colors = {}
-        db.colorsVersion = 2
-    end
-    db.colors = db.colors or {}
-    for i, def in ipairs(ns.DEFAULT_COLORS) do
-        local c = db.colors[i]
-        if type(c) ~= "table" or not c[1] or not c[2] or not c[3] then
-            db.colors[i] = { def[1], def[2], def[3] }
-        end
-    end
     ns.db = db
+    -- Profiles (see Profiles.lua) hold priorities, ties, extra specs and colors
+    ns.InitProfiles()
 end
 
 function ns.GetPrio(specID)
-    local saved = ns.db and ns.db.prios[specID]
+    local saved = ns.profile and ns.profile.prios[specID]
     if saved then return Normalize(saved) end
     return Normalize(CopyList(ns.SPEC_DEFAULTS[specID] or ns.GENERIC_DEFAULT))
 end
 
 function ns.SetPrio(specID, list)
-    ns.db.prios[specID] = Normalize(list)
+    ns.profile.prios[specID] = Normalize(list)
 end
 
 function ns.ResetPrio(specID)
-    ns.db.prios[specID] = nil
-    ns.db.ties[specID] = nil
+    ns.profile.prios[specID] = nil
+    ns.profile.ties[specID] = nil
 end
 
 -- Ties: ties[i] == true means the stat at position i has the same rank as position i-1
 function ns.GetTies(specID)
-    local saved = ns.db and ns.db.ties[specID]
+    local saved = ns.profile and ns.profile.ties[specID]
     local out = {}
     for i = 2, #ns.STAT_ORDER do
         out[i] = (saved and saved[i]) and true or false
@@ -86,10 +72,10 @@ end
 
 function ns.ToggleTie(specID, position)
     if position < 2 or position > #ns.STAT_ORDER then return end
-    local t = ns.db.ties[specID]
+    local t = ns.profile.ties[specID]
     if not t then
         t = {}
-        ns.db.ties[specID] = t
+        ns.profile.ties[specID] = t
     end
     t[position] = (not t[position]) or nil
 end
@@ -110,30 +96,30 @@ function ns.GetRanks(specID)
 end
 
 function ns.GetRankColor(rank)
-    return ns.db.colors[rank] or ns.DEFAULT_COLORS[rank] or { 1, 1, 1 }
+    return ns.profile.colors[rank] or ns.DEFAULT_COLORS[rank] or { 1, 1, 1 }
 end
 
 function ns.SetRankColor(rank, r, g, b)
-    ns.db.colors[rank] = { r, g, b }
+    ns.profile.colors[rank] = { r, g, b }
 end
 
 -- Extra specs shown next to the current one on tooltips
 function ns.IsExtra(specID)
-    return ns.db.extra[specID] and true or false
+    return ns.profile.extra[specID] and true or false
 end
 
 function ns.SetExtra(specID, value)
-    ns.db.extra[specID] = value and true or nil
+    ns.profile.extra[specID] = value and true or nil
 end
 
 local DEFAULT_SPEC_COLOR = { 1.00, 0.82, 0.00 }
 
 function ns.GetSpecColor(specID)
-    return ns.db.specColors[specID] or DEFAULT_SPEC_COLOR
+    return ns.profile.specColors[specID] or DEFAULT_SPEC_COLOR
 end
 
 function ns.SetSpecColor(specID, r, g, b)
-    ns.db.specColors[specID] = { r, g, b }
+    ns.profile.specColors[specID] = { r, g, b }
 end
 
 function ns.ClassOfSpec(specID)
@@ -203,7 +189,7 @@ local function Strip(text)
 end
 
 local function DecorateTooltip(tooltip)
-    if not ns.db or not ns.db.enabled then return end
+    if not ns.db or not ns.profile or not ns.db.enabled then return end
     if not tooltip or not tooltip.GetName or not tooltip.NumLines then return end
     local name = tooltip:GetName()
     if not name then return end
@@ -216,7 +202,7 @@ local function DecorateTooltip(tooltip)
     -- Extra specs (same class as the player, other than the current spec)
     local extras = {}
     local myClass = ns.ClassOfSpec(specID)
-    for id in pairs(ns.db.extra) do
+    for id in pairs(ns.profile.extra) do
         if id ~= specID and ns.ClassOfSpec(id) == myClass then
             local _, _, byKey = ns.GetRanks(id)
             extras[#extras + 1] = {
@@ -294,8 +280,17 @@ SLASH_STATPRIO1 = "/statprio"
 SLASH_STATPRIO2 = "/sprio"
 SlashCmdList["STATPRIO"] = function(msg)
     msg = (msg or ""):lower():match("^%s*(.-)%s*$")
+    local profileName = msg:match("^profile%s+(.+)$")
     if msg == "minimap" then
         if ns.ToggleMinimapButton then ns.ToggleMinimapButton() end
+    elseif profileName then
+        local ok = ns.SwitchProfileByName and ns.SwitchProfileByName(profileName)
+        if ok then
+            print("|cff0dd19eStatPrio|r: switched to profile " .. ns.profileName)
+            if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+        else
+            print("|cff0dd19eStatPrio|r: no profile named '" .. profileName .. "'.")
+        end
     elseif ns.Options and ns.Options.Toggle then
         ns.Options.Toggle()
     end

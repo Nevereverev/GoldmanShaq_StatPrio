@@ -114,6 +114,7 @@ function O.Refresh()
     local mine = ns.GetPlayerSpecID()
 
     frame.title:SetTextColor(ar, ag, ab)
+    frame.profileBtn.text:SetText("Profile: " .. (ns.profileName or "?"))
 
     -- classes
     for i, cls in ipairs(ns.CLASSES) do
@@ -220,6 +221,322 @@ local function PickSpecColor(specID)
 end
 
 ------------------------------------------------------------------------
+-- Dialog (export, import, naming and confirmations)
+------------------------------------------------------------------------
+local dialog
+
+local function ResizeBox()
+    local eb = dialog.edit
+    local txt = eb:GetText() or ""
+    dialog.measure:SetText(txt == "" and " " or txt)
+    local _, fontSize = ChatFontNormal:GetFont()
+    local estimate = math.ceil(#txt / 58) * ((fontSize or 14) + 2)
+    eb:SetHeight(math.max(160, math.max(dialog.measure:GetStringHeight(), estimate) + 12))
+end
+
+local function Accept()
+    local o = dialog.opts
+    if o and o.onOK then
+        local err = o.onOK(dialog.edit:GetText(), dialog.nameBox:GetText())
+        if err then
+            dialog.error:SetText(err)
+            return
+        end
+    end
+    dialog:Hide()
+end
+
+local function BuildDialog()
+    dialog = CreateFrame("Frame", "GoldmanShaq_StatPrioDialog", UIParent, "BackdropTemplate")
+    dialog:SetPoint("CENTER")
+    dialog:SetFrameStrata("FULLSCREEN_DIALOG")
+    dialog:SetMovable(true)
+    dialog:EnableMouse(true)
+    dialog:SetClampedToScreen(true)
+    dialog:RegisterForDrag("LeftButton")
+    dialog:SetScript("OnDragStart", dialog.StartMoving)
+    dialog:SetScript("OnDragStop", dialog.StopMovingOrSizing)
+    Skin(dialog, BG, BORDER)
+    tinsert(UISpecialFrames, "GoldmanShaq_StatPrioDialog")
+
+    dialog.title = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    dialog.title:SetPoint("TOPLEFT", 14, -12)
+
+    dialog.hint = dialog:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    dialog.hint:SetPoint("TOPLEFT", 14, -40)
+    dialog.hint:SetWidth(492)
+    dialog.hint:SetHeight(32)
+    dialog.hint:SetJustifyH("LEFT")
+    dialog.hint:SetJustifyV("TOP")
+
+    -- name row
+    dialog.nameLabel = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    dialog.nameLabel:SetPoint("TOPLEFT", 14, -82)
+    dialog.nameLabel:SetTextColor(0.7, 0.7, 0.7)
+
+    local nameBox = CreateFrame("EditBox", nil, dialog, "BackdropTemplate")
+    nameBox:SetSize(240, 22)
+    nameBox:SetPoint("TOPLEFT", 130, -77)
+    nameBox:SetFontObject(ChatFontNormal)
+    nameBox:SetAutoFocus(false)
+    nameBox:SetMaxLetters(32)
+    nameBox:SetTextInsets(6, 6, 0, 0)
+    Skin(nameBox, PANEL, BORDER)
+    nameBox:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    nameBox:SetScript("OnEnterPressed", function() Accept() end)
+    dialog.nameBox = nameBox
+
+    -- multi-line text area
+    local panel = CreateFrame("Frame", nil, dialog, "BackdropTemplate")
+    Skin(panel, PANEL, BORDER)
+    dialog.panel = panel
+
+    local scroll = CreateFrame("ScrollFrame", nil, panel)
+    scroll:SetPoint("TOPLEFT", 4, -4)
+    scroll:SetPoint("BOTTOMRIGHT", -4, 4)
+    scroll:EnableMouseWheel(true)
+    scroll:SetScript("OnMouseWheel", function(self, delta)
+        local cur = self:GetVerticalScroll()
+        local max = self:GetVerticalScrollRange()
+        self:SetVerticalScroll(math.max(0, math.min(max, cur - delta * 30)))
+    end)
+    dialog.scroll = scroll
+
+    local eb = CreateFrame("EditBox", nil, scroll)
+    eb:SetMultiLine(true)
+    eb:SetFontObject(ChatFontNormal)
+    eb:SetWidth(470)
+    eb:SetHeight(160)
+    eb:SetAutoFocus(false)
+    eb:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    eb:SetScript("OnEditFocusGained", function(self)
+        if self.readonly then self:HighlightText() end
+    end)
+    eb:SetScript("OnTextChanged", function(self, userInput)
+        if self.readonly and userInput then
+            self:SetText(self.orig or "")
+            self:HighlightText()
+            return
+        end
+        ResizeBox()
+    end)
+    scroll:SetScrollChild(eb)
+    dialog.edit = eb
+
+    -- invisible fontstring used to measure the text height
+    local measure = dialog:CreateFontString(nil, "ARTWORK")
+    measure:SetFontObject(ChatFontNormal)
+    measure:SetWidth(470)
+    measure:SetJustifyH("LEFT")
+    measure:SetAlpha(0)
+    measure:SetPoint("TOPLEFT", dialog, "BOTTOMLEFT", 0, -40)
+    dialog.measure = measure
+
+    dialog.error = dialog:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    dialog.error:SetPoint("BOTTOMLEFT", 14, 16)
+    dialog.error:SetWidth(300)
+    dialog.error:SetJustifyH("LEFT")
+    dialog.error:SetTextColor(1, 0.3, 0.3)
+
+    dialog.ok = MakeButton(dialog, "OK", 90, 26)
+    dialog.ok:SetPoint("BOTTOMRIGHT", -10, 10)
+    dialog.ok:SetScript("OnClick", Accept)
+
+    dialog.cancel = MakeButton(dialog, "Cancel", 90, 26)
+    dialog.cancel:SetPoint("BOTTOMRIGHT", -106, 10)
+    dialog.cancel:SetScript("OnClick", function() dialog:Hide() end)
+
+    dialog:Hide()
+end
+
+-- opts: title, hint, text, readonly, multiline, nameLabel, name, okText, noCancel,
+--       onOK(text, name) -> optional error message (keeps the dialog open)
+function O.OpenDialog(opts)
+    if not dialog then BuildDialog() end
+    local d = dialog
+    d.opts = opts
+    d.title:SetText(opts.title or "")
+    d.hint:SetText(opts.hint or "")
+    d.error:SetText("")
+
+    local height = 130
+    if opts.nameLabel then height = 170 end
+    if opts.multiline then height = 330 end
+    d:SetSize(520, height)
+
+    if opts.nameLabel then
+        d.nameLabel:SetText(opts.nameLabel)
+        d.nameLabel:Show()
+        d.nameBox:SetText(opts.name or "")
+        d.nameBox:Show()
+    else
+        d.nameLabel:Hide()
+        d.nameBox:SetText("")
+        d.nameBox:Hide()
+    end
+
+    if opts.multiline then
+        d.panel:ClearAllPoints()
+        if opts.nameLabel then
+            d.panel:SetPoint("TOPLEFT", 14, -108)
+            d.panel:SetSize(492, 170)
+        else
+            d.panel:SetPoint("TOPLEFT", 14, -80)
+            d.panel:SetSize(492, 198)
+        end
+        d.edit.readonly = opts.readonly and true or false
+        d.edit.orig = opts.text or ""
+        d.edit:SetText(opts.text or "")
+        ResizeBox()
+        d.scroll:SetVerticalScroll(0)
+        d.panel:Show()
+    else
+        d.panel:Hide()
+    end
+
+    d.ok.text:SetText(opts.okText or "OK")
+    d.cancel:SetShown(not opts.noCancel)
+    d:Show()
+
+    if opts.multiline then
+        d.edit:SetFocus()
+        if opts.readonly then d.edit:HighlightText() end
+    elseif opts.nameLabel then
+        d.nameBox:SetFocus()
+        d.nameBox:HighlightText()
+    end
+end
+
+------------------------------------------------------------------------
+-- Profile menu
+------------------------------------------------------------------------
+local function PromptNewProfile(copy)
+    O.OpenDialog({
+        title = copy and "Copy current profile" or "New empty profile",
+        hint = copy
+            and "Creates a new profile containing a copy of the current one, then switches to it."
+            or "Creates a new profile with default priorities, then switches to it.",
+        nameLabel = "Name:",
+        name = "",
+        okText = "Create",
+        onOK = function(_, name)
+            local n, err = ns.CreateProfile(name, copy)
+            if not n then return err end
+            O.Refresh()
+        end,
+    })
+end
+
+local function PromptRename()
+    local old = ns.profileName
+    O.OpenDialog({
+        title = "Rename profile",
+        hint = "Rename the profile '" .. old .. "'.",
+        nameLabel = "New name:",
+        name = old,
+        okText = "Rename",
+        onOK = function(_, name)
+            local n, err = ns.RenameProfile(old, name)
+            if not n then return err end
+            O.Refresh()
+        end,
+    })
+end
+
+local function PromptReset()
+    O.OpenDialog({
+        title = "Reset profile",
+        hint = "Reset '" .. ns.profileName .. "' to default priorities, ties, extra specs and colors? This cannot be undone.",
+        okText = "Reset",
+        onOK = function()
+            ns.ResetProfile()
+            O.Refresh()
+        end,
+    })
+end
+
+local function PromptDelete(name)
+    O.OpenDialog({
+        title = "Delete profile",
+        hint = "Delete the profile '" .. name .. "'? This cannot be undone.",
+        okText = "Delete",
+        onOK = function()
+            local ok, err = ns.DeleteProfile(name)
+            if not ok then return err end
+            O.Refresh()
+        end,
+    })
+end
+
+local function PromptExport()
+    O.OpenDialog({
+        title = "Export profile: " .. ns.profileName,
+        hint = "Press Ctrl+C to copy this text, then share it. Others can paste it into Import profile.",
+        multiline = true,
+        readonly = true,
+        text = ns.ExportProfile(),
+        okText = "Close",
+        noCancel = true,
+    })
+end
+
+local function PromptImport()
+    O.OpenDialog({
+        title = "Import profile",
+        hint = "Paste a profile string below. It is added as a new profile and switched to.",
+        multiline = true,
+        nameLabel = "Name (optional):",
+        name = "",
+        okText = "Import",
+        onOK = function(text, name)
+            local n, err = ns.ImportProfile(text, name)
+            if not n then return err end
+            O.Refresh()
+        end,
+    })
+end
+
+local function OpenProfileMenu(owner)
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then
+        print("|cff0dd19eStatPrio|r: profile menu unavailable. Use /statprio profile <name>.")
+        return
+    end
+    MenuUtil.CreateContextMenu(owner, function(_, root)
+        root:CreateTitle("Profiles")
+        for _, name in ipairs(ns.GetProfileNames()) do
+            root:CreateRadio(name,
+                function() return ns.profileName == name end,
+                function()
+                    ns.SwitchProfile(name)
+                    O.Refresh()
+                end)
+        end
+
+        root:CreateDivider()
+        root:CreateButton("New empty profile...", function() PromptNewProfile(false) end)
+        root:CreateButton("Copy current profile...", function() PromptNewProfile(true) end)
+        if ns.profileName ~= "Default" then
+            root:CreateButton("Rename current profile...", function() PromptRename() end)
+        end
+        root:CreateButton("Reset current profile...", function() PromptReset() end)
+
+        local del = root:CreateButton("Delete profile")
+        local any = false
+        for _, name in ipairs(ns.GetProfileNames()) do
+            if name ~= "Default" and name ~= ns.profileName then
+                any = true
+                del:CreateButton(name, function() PromptDelete(name) end)
+            end
+        end
+        if not any then del:CreateTitle("No other profiles") end
+
+        root:CreateDivider()
+        root:CreateButton("Export profile...", function() PromptExport() end)
+        root:CreateButton("Import profile...", function() PromptImport() end)
+    end)
+end
+
+------------------------------------------------------------------------
 -- Build
 ------------------------------------------------------------------------
 local function Build()
@@ -243,6 +560,14 @@ local function Build()
     local close = MakeButton(frame, "X", 24, 24)
     close:SetPoint("TOPRIGHT", -8, -8)
     close:SetScript("OnClick", function() frame:Hide() end)
+
+    local profileBtn = MakeButton(frame, "", 220, 24)
+    profileBtn:SetPoint("TOPRIGHT", -38, -8)
+    profileBtn.text:SetWidth(204)
+    profileBtn.text:SetWordWrap(false)
+    profileBtn:SetScript("OnClick", function(self) OpenProfileMenu(self) end)
+    AddTooltip(profileBtn, "Profiles: switch, create, export and import")
+    frame.profileBtn = profileBtn
 
     -- Left: class list
     local left = CreateFrame("Frame", nil, frame, "BackdropTemplate")
