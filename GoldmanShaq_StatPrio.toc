@@ -1,0 +1,14 @@
+## Interface: 120105
+## Title: GoldmanShaq_StatPrio
+## Notes: Shows your stat priority (#1, #2, ...) next to stats on item tooltips. Editable in game per class and spec. Type /statprio.
+## Author: Shaq
+## Category: Goldman Shaq
+## Version: 0.3.0
+## IconTexture: Interface\AddOns\GoldmanShaq_StatPrio\logo.tga
+## SavedVariables: GoldmanShaq_StatPrioDB
+## OptionalDeps: EllesmereUI
+
+Defaults.lua
+Core.lua
+Options.lua
+Minimap.lua
