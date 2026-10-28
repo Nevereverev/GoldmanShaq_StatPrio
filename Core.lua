@@ -188,7 +188,27 @@ local function Strip(text)
     return text
 end
 
-local function DecorateTooltip(tooltip)
+local GEM_TYPE = Enum and Enum.TooltipDataLineType and Enum.TooltipDataLineType.GemSocket
+
+-- True if this tooltip line is a socketed gem's stat line (we skip those)
+local function IsGemLine(data, index, text)
+    if text:find("|T", 1, true) then return true end -- gem icon embedded in the text
+    if not (GEM_TYPE and data and data.lines) then return false end
+
+    local line = data.lines[index]
+    if line and not IsSecret(line.leftText) and line.leftText == text then
+        return line.type == GEM_TYPE
+    end
+    -- line numbers did not match up: fall back to comparing the text
+    for _, l in ipairs(data.lines) do
+        if l.type == GEM_TYPE and not IsSecret(l.leftText) and l.leftText == text then
+            return true
+        end
+    end
+    return false
+end
+
+local function DecorateTooltip(tooltip, data)
     if not ns.db or not ns.profile or not ns.db.enabled then return end
     if not tooltip or not tooltip.GetName or not tooltip.NumLines then return end
     local name = tooltip:GetName()
@@ -223,7 +243,7 @@ local function DecorateTooltip(tooltip)
             if type(text) == "string" and not IsSecret(text) and not text:find(MARKER) then
                 local plain = Strip(text)
                 -- Only real stat lines ("+123 Haste"), not "Equip: ..." descriptions
-                if plain:find("^%s*%+%d") then
+                if plain:find("^%s*%+%d") and not IsGemLine(data, i, text) then
                     for key, label in pairs(ns.STAT_NAME) do
                         if plain:find(label, 1, true) then
                             local out = text
@@ -254,8 +274,8 @@ local function DecorateTooltip(tooltip)
     if changed and tooltip.Show then tooltip:Show() end
 end
 
-local function SafeDecorate(tooltip)
-    pcall(DecorateTooltip, tooltip)
+local function SafeDecorate(tooltip, data)
+    pcall(DecorateTooltip, tooltip, data)
 end
 
 ------------------------------------------------------------------------
@@ -270,8 +290,8 @@ f:SetScript("OnEvent", function(self, event, addon)
     if ns.InitMinimap then ns.InitMinimap() end
 
     if TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
-        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip)
-            SafeDecorate(tooltip)
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+            SafeDecorate(tooltip, data)
         end)
     end
 end)
